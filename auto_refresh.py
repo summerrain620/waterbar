@@ -1,0 +1,330 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+auto_refresh.py - 茶颜看板自动刷新脚本
+自动查找最新xlsx -> 转换CSV -> 更新JSON -> 推送GitHub
+
+使用方法:
+  1. 自动模式: python auto_refresh.py
+     (自动查找Downloads目录中最新的xlsx文件)
+  2. 指定文件: python auto_refresh.py "C:/path/to/file.xlsx"
+  3. 指定日期范围: python auto_refresh.py --all
+     (处理Downloads目录中所有未处理的xlsx文件)
+"""
+import os, sys, csv, json, glob, subprocess, shutil
+from datetime import datetime
+from pathlib import Path
+
+# ==================== 配置 ====================
+DOWNLOADS_DIR = os.path.join(os.path.expanduser("~"), "Downloads")
+REPO_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_JSON = os.path.join(REPO_DIR, "看板数据.json")
+CONVERT_SCRIPT = r"C:\Users\62398\.workbuddy\skills\chayan-xlsx-to-dashboard-csv\scripts\convert.py"
+PYTHON_EXE = r"C:\Users\62398\.workbuddy\binaries\python\envs\default\Scripts\python.exe"
+XLSX_PATTERN = "门店销售报表_茶颜_各门店各商品销量数据明细_*.xlsx"
+GITHUB_USERNAME = "summerrain620"
+REPO_NAME = "waterbar"
+GITHUB_PAGES_URL = f"https://{GITHUB_USERNAME}.github.io/{REPO_NAME}/"
+
+
+def log(msg, level="INFO"):
+    ts = datetime.now().strftime("%H:%M:%S")
+    print(f"[{ts}] [{level}] {msg}")
+
+
+def find_latest_xlsx():
+    """在Downloads目录找到最新的xlsx文件"""
+    pattern = os.path.join(DOWNLOADS_DIR, XLSX_PATTERN)
+    files = glob.glob(pattern)
+    if not files:
+        return None
+    files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
+    return files[0]
+
+
+def find_all_xlsx():
+    """找到Downloads目录中所有xlsx文件，按时间排序"""
+    pattern = os.path.join(DOWNLOADS_DIR, XLSX_PATTERN)
+    files = glob.glob(pattern)
+    if not files:
+        return []
+    files.sort(key=lambda f: os.path.getmtime(f))
+    return files
+
+
+def convert_xlsx_to_csv(xlsx_path, out_dir):
+    """调用转换脚本将xlsx转为CSV，返回CSV文件路径"""
+    cmd = [PYTHON_EXE, CONVERT_SCRIPT, xlsx_path, "--out", out_dir]
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+    if result.returncode != 0:
+        log(f"转换失败: {result.stderr}", "ERROR")
+        return None
+    csv_files = glob.glob(os.path.join(out_dir, "茶颜日杯数_*.csv"))
+    if not csv_files:
+        log("未找到输出的CSV文件", "ERROR")
+        return None
+    csv_files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
+    return csv_files[0]
+
+
+def parse_csv_to_data(csv_path):
+    """解析CSV，构建actualDaily和productDaily字典
+
+    CSV格式: 日期,门店编码,杯数总计,冰茶销量,咖啡销量,罐子销量,冰茶试味,咖啡试味,罐子试味
+
+    Returns: (date_str, actualDaily, productDaily)
+        - date_str: 8位日期字符串，如 "20260706"
+        - actualDaily: { "20260706": { "C02700058": 846, ... }, ... }
+        - productDaily: { "20260706": { "C02700058": { icedTea, coffee, can, ... }, ... }, ... }
+    """
+    actualDaily = {}
+    productDaily = {}
+    date_str = None
+    store_count = 0
+
+    with open(csv_path, "r", encoding="utf-8-sig") as f:
+        reader = csv.reader(f)
+        header = next(reader, None)
+
+        for row in reader:
+            if len(row) < 3:
+                continue
+
+            date_raw = row[0].strip()
+            store_code = row[1].strip()
+            if not date_raw or not store_code:
+                continue
+
+            try:
+                total = int(float(row[2])) if row[2] else 0
+            except (ValueError, TypeError):
+                total = 0
+
+            # Normalize date: "2026-07-06" -> "20260706"
+            date_norm = date_raw.replace("-", "")
+            if len(date_norm) != 8:
+                continue
+            # Fix year: 2025 -> 2026 (dashboard convention)
+            if date_norm.startswith("2025"):
+                date_norm = "2026" + date_norm[4:]
+
+            if not date_str:
+                date_str = date_norm
+
+            # Build actualDaily
+            if date_norm not in actualDaily:
+                actualDaily[date_norm] = {}
+            actualDaily[date_norm][store_code] = total
+
+            # Build productDaily (if 9-column format)
+            if len(row) >= 9:
+                try:
+                    iced_tea = int(float(row[3])) if row[3] else 0
+                    coffee = int(float(row[4])) if row[4] else 0
+                    can = int(float(row[5])) if row[5] else 0
+                    iced_tea_taste = int(float(row[6])) if row[6] else 0
+                    coffee_taste = int(float(row[7])) if row[7] else 0
+                    can_taste = int(float(row[8])) if row[8] else 0
+                except (ValueError, TypeError):
+                    iced_tea = coffee = can = 0
+                    iced_tea_taste = coffee_taste = can_taste = 0
+
+                if date_norm not in productDaily:
+                    productDaily[date_norm] = {}
+                productDaily[date_norm][store_code] = {
+                    "icedTea": iced_tea,
+                    "coffee": coffee,
+                    "can": can,
+                    "icedTeaTaste": iced_tea_taste,
+                    "coffeeTaste": coffee_taste,
+                    "canTaste": can_taste,
+                }
+
+            store_count += 1
+
+    return date_str, actualDaily, productDaily, store_count
+
+
+def update_json(date_str, actualDaily, productDaily):
+    """更新看板数据.json，合并新数据"""
+    with open(DATA_JSON, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    # Determine month key from date (20260706 -> "2026-07")
+    month_key = f"{date_str[:4]}-{date_str[4:6]}"
+
+    # Ensure months structure exists
+    if "months" not in data:
+        data["months"] = {}
+
+    # If month doesn't exist, create from latest month's config
+    if month_key not in data["months"]:
+        existing_months = sorted(data["months"].keys())
+        if existing_months:
+            latest = existing_months[-1]
+            new_month = dict(data["months"][latest])
+            new_month["actualDaily"] = {}
+            new_month["productDaily"] = {}
+            data["months"][month_key] = new_month
+            log(f"创建新月份: {month_key} (从 {latest} 复制配置)")
+        else:
+            log("JSON中没有任何月份数据！", "ERROR")
+            return False
+
+    month_data = data["months"][month_key]
+
+    # Merge actualDaily (new data overwrites same date+store)
+    if "actualDaily" not in month_data:
+        month_data["actualDaily"] = {}
+    merged_actual = 0
+    for date, stores in actualDaily.items():
+        if date not in month_data["actualDaily"]:
+            month_data["actualDaily"][date] = {}
+        month_data["actualDaily"][date].update(stores)
+        merged_actual += len(stores)
+
+    # Merge productDaily
+    if "productDaily" not in month_data:
+        month_data["productDaily"] = {}
+    merged_prod = 0
+    for date, stores in productDaily.items():
+        if date not in month_data["productDaily"]:
+            month_data["productDaily"][date] = {}
+        month_data["productDaily"][date].update(stores)
+        merged_prod += len(stores)
+
+    # Update meta
+    if "meta" not in data:
+        data["meta"] = {}
+    data["meta"]["currentMonth"] = month_key
+    data["meta"]["months"] = sorted(data["months"].keys())
+    data["savedAt"] = datetime.now().isoformat()
+
+    # Save JSON
+    with open(DATA_JSON, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    log(f"JSON更新完成: 月份={month_key}, 日期={date_str}")
+    log(f"  杯数记录: {merged_actual} 条, 产品记录: {merged_prod} 条")
+    return True
+
+
+def git_push(commit_msg=None):
+    """提交并推送到GitHub"""
+    os.chdir(REPO_DIR)
+
+    # Git add
+    subprocess.run(["git", "add", "看板数据.json"], check=True, capture_output=True)
+
+    # Check if there are changes to commit
+    result = subprocess.run(
+        ["git", "diff", "--cached", "--quiet"], capture_output=True
+    )
+    if result.returncode == 0:
+        log("数据无变更，跳过推送")
+        return False
+
+    # Git commit
+    if not commit_msg:
+        commit_msg = f"数据更新: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    subprocess.run(
+        ["git", "commit", "-m", commit_msg], check=True, capture_output=True, text=True
+    )
+    log(f"已提交: {commit_msg}")
+
+    # Git push
+    result = subprocess.run(
+        ["git", "push"], capture_output=True, text=True, encoding="utf-8"
+    )
+    if result.returncode != 0:
+        log(f"推送失败: {result.stderr}", "ERROR")
+        return False
+    else:
+        log("推送成功！GitHub Pages 将在1-2分钟内自动更新")
+        return True
+
+
+def process_one_xlsx(xlsx_path, do_push=True):
+    """处理单个xlsx文件: 转换 -> 更新JSON -> 推送"""
+    fname = os.path.basename(xlsx_path)
+    log(f"处理: {fname}")
+
+    # Step 1: Convert xlsx to CSV
+    log("[1/3] 转换 xlsx -> CSV ...")
+    csv_path = convert_xlsx_to_csv(xlsx_path, REPO_DIR)
+    if not csv_path:
+        return False
+    log(f"  CSV: {os.path.basename(csv_path)}")
+
+    # Step 2: Parse CSV and update JSON
+    log("[2/3] 解析CSV，更新JSON ...")
+    date_str, actualDaily, productDaily, store_count = parse_csv_to_data(csv_path)
+    if not date_str:
+        log("CSV解析失败！", "ERROR")
+        return False
+    log(f"  数据日期: {date_str}, 门店数: {store_count}")
+
+    ok = update_json(date_str, actualDaily, productDaily)
+
+    # Clean up CSV
+    try:
+        os.remove(csv_path)
+    except:
+        pass
+
+    if not ok:
+        return False
+
+    # Step 3: Git push
+    if do_push:
+        log("[3/3] 推送到GitHub ...")
+        git_push()
+    else:
+        log("[3/3] 跳过推送 (批量模式，最后统一推送)")
+
+    return True
+
+
+def main():
+    print("=" * 50)
+    print(f"  茶颜看板自动刷新  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 50)
+
+    # Determine which xlsx files to process
+    if len(sys.argv) > 1 and sys.argv[1] == "--all":
+        # Process all xlsx files
+        xlsx_files = find_all_xlsx()
+        if not xlsx_files:
+            log("Downloads目录中未找到xlsx文件", "ERROR")
+            sys.exit(1)
+        log(f"找到 {len(xlsx_files)} 个xlsx文件")
+        success_count = 0
+        for i, xlsx in enumerate(xlsx_files):
+            log(f"--- [{i+1}/{len(xlsx_files)}] ---")
+            if process_one_xlsx(xlsx, do_push=(i == len(xlsx_files) - 1)):
+                success_count += 1
+        log(f"完成: {success_count}/{len(xlsx_files)} 个文件处理成功")
+    elif len(sys.argv) > 1 and sys.argv[1] != "--all":
+        # Process specified file
+        xlsx_path = sys.argv[1]
+        if not os.path.exists(xlsx_path):
+            log(f"文件不存在: {xlsx_path}", "ERROR")
+            sys.exit(1)
+        process_one_xlsx(xlsx_path, do_push=True)
+    else:
+        # Auto mode: find latest xlsx
+        xlsx_path = find_latest_xlsx()
+        if not xlsx_path:
+            log("Downloads目录中未找到xlsx文件", "ERROR")
+            log(f"  搜索目录: {DOWNLOADS_DIR}")
+            log(f"  文件模式: {XLSX_PATTERN}")
+            sys.exit(1)
+        process_one_xlsx(xlsx_path, do_push=True)
+
+    print()
+    print(f"看板地址: {GITHUB_PAGES_URL}")
+    print("=" * 50)
+
+
+if __name__ == "__main__":
+    main()

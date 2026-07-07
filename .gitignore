@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+
+# Temporary files
+*.csv
+!茶颜日杯数_*.csv
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Keep everything else
