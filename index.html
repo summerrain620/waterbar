@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>6月杯数同比达成看板</title>
+<title>茶颜同比店杯数达成看板</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <style>
 :root {
@@ -419,7 +419,7 @@ tr:hover td { background: var(--primary-light); }
 <div id="chayanContent">
 <div class="header">
   <div>
-    <h1 id="dashboardTitle">6月杯数同比达成看板</h1>
+    <h1 id="dashboardTitle">茶颜同比店杯数达成看板</h1>
     <!-- <SNAPSHOT_SUB_START> -->
     <div class="sub"><span id="headerStoreCount">—家门店</span> | 口径：现制+预制饮品 | 数据版本: <span id="headerDataVersion">20250612-v2</span> | 更新时间: <span id="headerUpdateTime">—</span></div>
     <!-- <SNAPSHOT_SUB_END> -->
@@ -978,7 +978,7 @@ function switchMonth(monthKey) {
   // 更新大标题
   var m = monthKey.split('-')[1].replace(/^0/,'');
   var titleEl = document.getElementById('dashboardTitle');
-  if (titleEl) titleEl.textContent = m + '月杯数同比达成看板';
+  if (titleEl) titleEl.textContent = m + '月茶颜同比店杯数达成看板';
   updateCityTabBadges();
   updateHeaderInfo();
   updateMonthBar();
@@ -1586,7 +1586,7 @@ function updateHeaderInfo() {
   const titleEl = document.getElementById('dashboardTitle');
   if (titleEl && state.currentMonth) {
     const m = state.currentMonth.split('-')[1].replace(/^0/, '');
-    titleEl.textContent = m + '月杯数同比达成看板';
+    titleEl.textContent = m + '月茶颜同比店杯数达成看板';
   }
 
   // 动态更新顶部门店数
@@ -5402,7 +5402,7 @@ async function exportSnapshot() {
     '    var mo = cm.split(\"-\")[1];\n' +
     '    if (mo) mo = mo.replace(/^0/, \"\");\n' +
     '    var te = document.getElementById(\"dashboardTitle\");\n' +
-    '    if (te && mo) te.textContent = mo + \"月杯数同比达成看板\";\n' +
+    '    if (te && mo) te.textContent = mo + \"月茶颜同比店杯数达成看板\";\n' +
     '    sbUpdateBrandBadges();\n' +
     '    render();\n' +
     '  } catch(e) {\n' +
@@ -5527,7 +5527,7 @@ async function exportReadOnlySnapshot() {
     '    var mo = cm.split(\"-\")[1];\n' +
     '    if (mo) mo = mo.replace(/^0/, \"\");\n' +
     '    var te = document.getElementById(\"dashboardTitle\");\n' +
-    '    if (te && mo) te.textContent = mo + \"月杯数同比达成看板\";\n' +
+    '    if (te && mo) te.textContent = mo + \"月茶颜同比店杯数达成看板\";\n' +
     '    sbUpdateBrandBadges();\n' +
     '    render();\n' +
     '  } catch(e) {\n' +
