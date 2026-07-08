@@ -24,12 +24,32 @@ PYTHON_EXE = r"C:\Users\62398\.workbuddy\binaries\python\envs\default\Scripts\py
 XLSX_PATTERN = "门店销售报表_茶颜_各门店各商品销量数据明细_*.xlsx"
 GITHUB_USERNAME = "summerrain620"
 REPO_NAME = "waterbar"
+
+# Read token from git-ignored file (do NOT hardcode tokens!)
+def _load_token():
+    token_path = os.path.join(REPO_DIR, ".github_token")
+    if os.path.exists(token_path):
+        with open(token_path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    return None
+
+GITHUB_TOKEN = _load_token()
+if not GITHUB_TOKEN:
+    raise RuntimeError("未找到 .github_token 文件，请确保该文件存在于仓库目录中")
+GITHUB_PUSH_URL = f"https://{GITHUB_USERNAME}:{GITHUB_TOKEN}@github.com/{GITHUB_USERNAME}/{REPO_NAME}.git"
 GITHUB_PAGES_URL = f"https://{GITHUB_USERNAME}.github.io/{REPO_NAME}/"
+LOG_FILE = os.path.join(REPO_DIR, "auto_refresh.log")
 
 
 def log(msg, level="INFO"):
     ts = datetime.now().strftime("%H:%M:%S")
-    print(f"[{ts}] [{level}] {msg}")
+    line = f"[{ts}] [{level}] {msg}"
+    print(line)
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as lf:
+            lf.write(datetime.now().strftime("%Y-%m-%d ") + line + "\n")
+    except:
+        pass
 
 
 def find_latest_xlsx():
@@ -232,9 +252,9 @@ def git_push(commit_msg=None):
     )
     log(f"已提交: {commit_msg}")
 
-    # Git push
+    # Git push (use token URL to avoid credential prompt)
     result = subprocess.run(
-        ["git", "push"], capture_output=True, text=True, encoding="utf-8"
+        ["git", "push", GITHUB_PUSH_URL, "main"], capture_output=True, text=True, encoding="utf-8"
     )
     if result.returncode != 0:
         log(f"推送失败: {result.stderr}", "ERROR")
