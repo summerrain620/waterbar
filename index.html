@@ -1002,7 +1002,12 @@ function applyData(data) {
     allMonthsData = data.months;
     state.allMonths = Object.keys(data.months).sort();
     if (data.prefs) { applyPrefs(data.prefs); }
-    var currentMonth = (data.meta && data.meta.currentMonth) || state.allMonths[state.allMonths.length - 1];
+    // 优先默认到当前日历月份，若不存在则回退到 meta.currentMonth 或最后一个月
+    var now = new Date();
+    var currentCalendarMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+    var currentMonth = (state.allMonths.indexOf(currentCalendarMonth) >= 0 && currentCalendarMonth)
+      || (data.meta && data.meta.currentMonth)
+      || state.allMonths[state.allMonths.length - 1];
     loadMonthData(currentMonth);
   } else {
     // 旧格式兼容：整个数据包当作 2026-06 月份数据

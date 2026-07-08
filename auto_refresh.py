@@ -213,11 +213,11 @@ def update_json(date_str, actualDaily, productDaily):
         month_data["productDaily"][date].update(stores)
         merged_prod += len(stores)
 
-    # Update meta
+    # Update meta: 始终定位到最新月份，避免旧数据把页面拉回历史月份
     if "meta" not in data:
         data["meta"] = {}
-    data["meta"]["currentMonth"] = month_key
     data["meta"]["months"] = sorted(data["months"].keys())
+    data["meta"]["currentMonth"] = data["meta"]["months"][-1]  # 最新月份
     data["savedAt"] = datetime.now().isoformat()
 
     # Save JSON
