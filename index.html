@@ -836,6 +836,8 @@ tr:hover td { background: var(--primary-light); }
 
 // ===== 数据加载逻辑（代码与数据分离 + 多月架构 @ 20260626）=====
 const DATA_FILE_NAME = '看板数据.json';
+const DATA_CACHE_KEY = 'dashboard_json_cache_v2';
+const DATA_CACHE_TIME_KEY = 'dashboard_json_cache_time_v2';
 let dataLoadPromise = null;
 let allMonthsData = {};
 
@@ -1150,24 +1152,69 @@ function saveDataToFile() {
 // DOM 加载后尝试自动读取数据文件
 // 优先级：fetch(服务器模式) → sessionStorage(同窗口缓存) → 自动弹文件选择框
 window.addEventListener('DOMContentLoaded', function() {
-  loadDataFromFile().then(fetchOk => {
-    if (fetchOk) {
-      // fetch 成功（HTTP模式），缓存到 sessionStorage
-      try { sessionStorage.setItem('dashboard_data_cache', JSON.stringify({ data: collectCurrentData(), time: new Date().toISOString() })); } catch(e) {}
-      return;
+  var loadedFromCache = false;
+
+  // Step 1: 尝试 localStorage 缓存（毫秒级即时加载）
+  try {
+    var cachedRaw = localStorage.getItem(DATA_CACHE_KEY);
+    if (cachedRaw) {
+      var cached = JSON.parse(cachedRaw);
+      applyData(cached);
+      render();
+      loadedFromCache = true;
+      console.log('[cache] 即时加载缓存 (' + (cached.savedAt || '').slice(0,10) + ')');
     }
-    // fetch 失败（file:// 协议被浏览器阻止），尝试从 sessionStorage 恢复
-    if (tryRestoreFromSession()) return;
-    // 都失败，自动弹出文件选择框（无需手动点按钮）
-    setTimeout(() => {
-      if (!STORES.length) promptLoadDataFile();
-    }, 600);
-  }).catch(() => {
-    if (tryRestoreFromSession()) return;
-    setTimeout(() => {
-      if (!STORES.length) promptLoadDataFile();
-    }, 600);
-  });
+  } catch(e) { console.warn('[cache] 缓存加载失败:', e.message); }
+
+  // Step 2: 后台拉取最新数据（带时间戳防浏览器缓存）
+  fetch(DATA_FILE_NAME + '?t=' + Date.now())
+    .then(function(resp) {
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      return resp.text();
+    })
+    .then(function(text) {
+      var fresh = JSON.parse(text);
+      var freshTime = fresh.savedAt || '';
+      var cachedTime = '';
+      try {
+        var oldT = localStorage.getItem(DATA_CACHE_TIME_KEY);
+        cachedTime = oldT || '';
+      } catch(e) {}
+
+      if (freshTime !== cachedTime) {
+        // 数据有变化：更新缓存并重渲染
+        try {
+          localStorage.setItem(DATA_CACHE_KEY, text);
+          localStorage.setItem(DATA_CACHE_TIME_KEY, freshTime);
+        } catch(e) { console.warn('[cache] 缓存写入失败（可能超出容量）'); }
+        applyData(fresh);
+        render();
+        console.log('[cache] 数据已更新 (' + freshTime.slice(0,10) + ')');
+        showToast('数据已更新 (' + freshTime.slice(0,10) + ')', 'success');
+      } else {
+        console.log('[cache] 数据无变化');
+        if (!loadedFromCache) {
+          // 首次访问但没有缓存差异，仍需要加载
+          applyData(fresh);
+          render();
+          try {
+            localStorage.setItem(DATA_CACHE_KEY, text);
+            localStorage.setItem(DATA_CACHE_TIME_KEY, freshTime);
+          } catch(e) {}
+        }
+      }
+    })
+    .catch(function(e) {
+      console.error('[loadData] 网络请求失败:', e.message);
+      if (!loadedFromCache) {
+        // 无缓存且网络失败 → 弹文件选择框
+        setTimeout(function() {
+          if (!STORES.length) promptLoadDataFile();
+        }, 600);
+      } else {
+        showToast('⚠️ 无法获取最新数据，显示缓存版本', 'warning');
+      }
+    });
 });
 // ===== 数据加载逻辑结束 =====
 

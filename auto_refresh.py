@@ -220,9 +220,9 @@ def update_json(date_str, actualDaily, productDaily):
     data["meta"]["currentMonth"] = data["meta"]["months"][-1]  # 最新月份
     data["savedAt"] = datetime.now().isoformat()
 
-    # Save JSON
+    # Save JSON (minified for faster network transfer)
     with open(DATA_JSON, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+        json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
 
     log(f"JSON更新完成: 月份={month_key}, 日期={date_str}")
     log(f"  杯数记录: {merged_actual} 条, 产品记录: {merged_prod} 条")
