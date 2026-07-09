@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-watch_xlsx.py - 实时监控下载文件夹，xlsx 文件一到立即自动刷新
+watch_xlsx.py - 实时监控「茶颜看板数据」专用文件夹，xlsx 文件一到立即自动刷新
 
 启动方式：
   python watch_xlsx.py         前台运行（终端可见）
@@ -18,7 +18,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 # ==================== 配置 ====================
-DOWNLOADS_DIR = os.path.join(os.path.expanduser("~"), "Downloads")
+DOWNLOADS_DIR = r"C:\Users\62398\茶颜看板数据"
 REPO_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(REPO_DIR, "watch_xlsx.log")
 STATE_FILE = os.path.join(REPO_DIR, ".watch_state.json")
