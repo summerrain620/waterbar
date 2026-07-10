@@ -836,6 +836,10 @@ tr:hover td { background: var(--primary-light); }
 
 // ===== 数据加载逻辑（代码与数据分离 + 多月架构 @ 20260626）=====
 const DATA_FILE_NAME = '看板数据.json';
+// ⚠️ 每次手动修改看板数据.json结构后必须递增此版本号，用于穿透GitHub Pages CDN缓存
+// auto_refresh.py每天更新actualDaily不会触发CDN缓存问题（文件内容变化+重新部署）
+// 但手动修改DAILY_TARGETS/MONTHLY_TARGETS等结构时需更新此版本号
+const JSON_CACHE_BUSTER = 'v2';
 const DATA_CACHE_TIME_KEY = 'dashboard_json_cache_time_v2';
 // JSON 缓存改为内存变量，不再存 localStorage（避免与 cup_dashboard_v2_state 争抢 5MB 限额）
 // 之前 dashboard_json_cache_v2 占用 ~4.5MB，加上 state ~1.5MB = 6MB，超过浏览器 5MB 限制
@@ -1221,7 +1225,7 @@ window.addEventListener('DOMContentLoaded', function() {
   }
 
   // Step 2: 后台拉取最新数据（带时间戳防浏览器缓存）
-  fetch(DATA_FILE_NAME + '?t=' + Date.now())
+  fetch(DATA_FILE_NAME + '?v=' + JSON_CACHE_BUSTER + '&t=' + Date.now(), { cache: 'no-store' })
     .then(function(resp) {
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       return resp.text();
