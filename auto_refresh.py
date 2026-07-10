@@ -19,8 +19,11 @@ from pathlib import Path
 DOWNLOADS_DIR = os.path.join(os.path.expanduser("~"), "Downloads")
 REPO_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_JSON = os.path.join(REPO_DIR, "看板数据.json")
-CONVERT_SCRIPT = r"C:\Users\62398\.workbuddy\skills\chayan-xlsx-to-dashboard-csv\scripts\convert.py"
-PYTHON_EXE = r"C:\Users\62398\.workbuddy\binaries\python\envs\default\Scripts\python.exe"
+CONVERT_DIR = r"C:\Users\62398\.workbuddy\skills\chayan-xlsx-to-dashboard-csv\scripts"
+
+# 直接导入 convert 模块（避免 subprocess 链条不稳定）
+sys.path.insert(0, CONVERT_DIR)
+import convert as _convert
 XLSX_PATTERN = "门店销售报表_茶颜_各门店各商品销量数据明细_*.xlsx"
 GITHUB_USERNAME = "summerrain620"
 REPO_NAME = "waterbar"
@@ -73,18 +76,28 @@ def find_all_xlsx():
 
 
 def convert_xlsx_to_csv(xlsx_path, out_dir):
-    """调用转换脚本将xlsx转为CSV，返回CSV文件路径"""
-    cmd = [PYTHON_EXE, CONVERT_SCRIPT, xlsx_path, "--out", out_dir]
-    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
-    if result.returncode != 0:
-        log(f"转换失败: {result.stderr}", "ERROR")
+    """直接调用 convert 模块转换 xlsx → CSV（不走 subprocess，更稳定）"""
+    # Determine output CSV path based on file naming convention
+    fname = os.path.basename(xlsx_path)
+    # Extract date from filename: ...YYYYMMDD_HH_MM_SS.xlsx → YYYYMMDD
+    parts = fname.replace(".xlsx", "").split("_")
+    date_str = None
+    for p in parts:
+        if len(p) == 8 and p.isdigit():
+            date_str = p
+            break
+    if not date_str:
+        log(f"无法从文件名提取日期: {fname}", "ERROR")
         return None
-    csv_files = glob.glob(os.path.join(out_dir, "茶颜日杯数_*.csv"))
-    if not csv_files:
-        log("未找到输出的CSV文件", "ERROR")
+
+    csv_path = os.path.join(out_dir, f"茶颜日杯数_{date_str}.csv")
+    try:
+        store_count, _, _ = _convert.convert_one(xlsx_path, csv_path)
+        log(f"  转换完成: {store_count} 条记录")
+        return csv_path
+    except Exception as e:
+        log(f"转换失败: {e}", "ERROR")
         return None
-    csv_files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
-    return csv_files[0]
 
 
 def parse_csv_to_data(csv_path):
