@@ -1215,6 +1215,11 @@ window.addEventListener('DOMContentLoaded', function() {
     }
   } catch(e) { console.warn('[cache] 缓存加载失败:', e.message); }
 
+  // Step 1.5: 同窗口刷新时从 sessionStorage 恢复（关闭标签页后失效）
+  if (!loadedFromCache) {
+    loadedFromCache = tryRestoreFromSession();
+  }
+
   // Step 2: 后台拉取最新数据（带时间戳防浏览器缓存）
   fetch(DATA_FILE_NAME + '?t=' + Date.now())
     .then(function(resp) {
@@ -1246,6 +1251,7 @@ window.addEventListener('DOMContentLoaded', function() {
           console.log('[cache] 已从内存恢复用户校准数据（fetch 后保护）');
         }
         render();
+        try { sessionStorage.setItem('dashboard_data_cache', JSON.stringify({ data: fresh, time: freshTime })); } catch(e) {}
         console.log('[cache] 数据已更新 (' + freshTime.slice(0,10) + ')');
       } else {
         console.log('[cache] 数据无变化');
@@ -1255,16 +1261,19 @@ window.addEventListener('DOMContentLoaded', function() {
           try { localStorage.setItem(DATA_CACHE_TIME_KEY, freshTime); } catch(e) {}
           applyData(fresh);
           render();
+          try { sessionStorage.setItem('dashboard_data_cache', JSON.stringify({ data: fresh, time: freshTime })); } catch(e) {}
         }
       }
     })
     .catch(function(e) {
       console.error('[loadData] 网络请求失败:', e.message);
       if (!loadedFromCache) {
-        // 无缓存且网络失败 → 弹文件选择框
-        setTimeout(function() {
-          if (!STORES.length) promptLoadDataFile();
-        }, 600);
+        // 无缓存且网络失败 → 先尝试 sessionStorage，最后再弹文件选择框
+        if (!tryRestoreFromSession()) {
+          setTimeout(function() {
+            if (!STORES.length) promptLoadDataFile();
+          }, 600);
+        }
       } else {
         showToast('⚠️ 无法获取最新数据，显示缓存版本', 'warning');
       }
