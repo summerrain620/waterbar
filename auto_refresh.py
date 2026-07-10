@@ -11,7 +11,7 @@ auto_refresh.py - 茶颜看板自动刷新脚本
   3. 指定日期范围: python auto_refresh.py --all
      (处理Downloads目录中所有未处理的xlsx文件)
 """
-import os, sys, csv, json, glob, subprocess, shutil
+import os, sys, csv, json, glob, subprocess, shutil, time
 from datetime import datetime
 from pathlib import Path
 
@@ -242,40 +242,116 @@ def update_json(date_str, actualDaily, productDaily):
     return True
 
 
-def git_push(commit_msg=None):
-    """提交并推送到GitHub（使用完整 git 路径，兼容 pythonw 后台运行）"""
+def _run_git(args, timeout=60):
+    """可靠地运行 git 命令（适配 pythonw.exe 后台运行环境）
+
+    问题背景：从 pythonw.exe（无控制台后台进程）调用 subprocess.run([git.exe, ...])
+    会间歇性触发 [WinError 2] 系统找不到指定的文件（约 60% 概率）。
+    根因是 Windows CreateProcess API 在无控制台上下文中的路径解析不稳定。
+
+    解决方案：先尝试 list 模式（安全），失败后自动降级为 shell=True 模式（更可靠）。
+    """
     GIT_EXE = r"C:\Users\62398\.workbuddy\vendor\PortableGit\mingw64\bin\git.exe"
-    os.chdir(REPO_DIR)
+    cmd = [GIT_EXE] + args
 
-    # Git add
-    subprocess.run([GIT_EXE, "add", "看板数据.json"], check=True, capture_output=True)
+    # Attempt 1: list-based subprocess (preferred, no shell injection risk)
+    try:
+        return subprocess.run(cmd, cwd=REPO_DIR, capture_output=True,
+                            text=True, encoding="utf-8", timeout=timeout)
+    except FileNotFoundError:
+        pass  # Fall through to shell=True fallback
 
-    # Check if there are changes to commit
-    result = subprocess.run(
-        [GIT_EXE, "diff", "--cached", "--quiet"], capture_output=True
-    )
-    if result.returncode == 0:
-        log("数据无变更，跳过推送")
-        return False
+    # Attempt 2: shell=True (more reliable from pythonw.exe background processes)
+    try:
+        shell_cmd = f'"{GIT_EXE}" ' + ' '.join(
+            f'"{a}"' if (' ' in a or '&' in a) else a for a in args
+        )
+        return subprocess.run(shell_cmd, shell=True, cwd=REPO_DIR,
+                            capture_output=True, text=True, encoding="utf-8", timeout=timeout)
+    except Exception:
+        raise
 
-    # Git commit
-    if not commit_msg:
-        commit_msg = f"数据更新: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-    subprocess.run(
-        [GIT_EXE, "commit", "-m", commit_msg], check=True, capture_output=True, text=True
-    )
-    log(f"已提交: {commit_msg}")
 
-    # Git push (use token URL to avoid credential prompt)
-    result = subprocess.run(
-        [GIT_EXE, "push", GITHUB_PUSH_URL, "main"], capture_output=True, text=True, encoding="utf-8"
-    )
-    if result.returncode != 0:
-        log(f"推送失败: {result.stderr}", "ERROR")
-        return False
-    else:
-        log("推送成功！GitHub Pages 将在1-2分钟内自动更新")
-        return True
+def git_push(commit_msg=None):
+    """提交并推送到GitHub（带重试 + 自动解决冲突 + 兼容 pythonw 后台运行）"""
+    MAX_RETRIES = 3
+    RETRY_DELAY = 5  # seconds
+
+    for attempt in range(MAX_RETRIES):
+        try:
+            # Step 0: 先拉取远程最新代码，避免推送冲突
+            if attempt > 0:
+                log(f"git 重试 (attempt {attempt+1}/{MAX_RETRIES})...")
+            try:
+                pull_result = _run_git(["pull", "--rebase", "origin", "main"])
+                if pull_result.returncode != 0:
+                    # Pull 失败不一定是致命的（可能是网络或已是最新）
+                    stderr_tail = pull_result.stderr.strip().split('\n')[-1] if pull_result.stderr else ''
+                    log(f"git pull 返回: {stderr_tail[:100]}", "WARN")
+            except Exception as e:
+                log(f"git pull 异常 (非致命): {e}", "WARN")
+
+            # Step 1: Git add
+            add_result = _run_git(["add", "看板数据.json"])
+            if add_result.returncode != 0:
+                log(f"git add 失败: {add_result.stderr}", "ERROR")
+                if attempt < MAX_RETRIES - 1:
+                    time.sleep(RETRY_DELAY)
+                    continue
+                return False
+
+            # Step 2: Check if there are changes to commit
+            diff_result = _run_git(["diff", "--cached", "--quiet"])
+            if diff_result.returncode == 0:
+                log("数据无变更，跳过推送")
+                return True  # No changes is OK, not a failure
+
+            # Step 3: Git commit
+            if not commit_msg:
+                commit_msg = f"数据更新: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            commit_result = _run_git(["commit", "-m", commit_msg])
+            if commit_result.returncode != 0:
+                log(f"git commit 失败: {commit_result.stderr}", "ERROR")
+                if attempt < MAX_RETRIES - 1:
+                    time.sleep(RETRY_DELAY)
+                    continue
+                return False
+            log(f"已提交: {commit_msg}")
+
+            # Step 4: Git push
+            push_result = _run_git(["push", GITHUB_PUSH_URL, "main"])
+            if push_result.returncode == 0:
+                log("推送成功！GitHub Pages 将在1-2分钟内自动更新")
+                return True
+
+            # Push failed — check if it's a conflict we can resolve
+            stderr = push_result.stderr or ''
+            if "rejected" in stderr or "fetch first" in stderr:
+                log("推送被拒(远程有新提交)，尝试 pull --rebase 后重推...")
+                try:
+                    _run_git(["pull", "--rebase", "origin", "main"])
+                    push_result2 = _run_git(["push", GITHUB_PUSH_URL, "main"])
+                    if push_result2.returncode == 0:
+                        log("冲突解决成功，推送完成！")
+                        return True
+                except Exception as e:
+                    log(f"冲突解决失败: {e}", "ERROR")
+
+            log(f"推送失败: {stderr.strip()[-200:]}", "ERROR")
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(RETRY_DELAY)
+
+        except FileNotFoundError as e:
+            log(f"git.exe 不可用 (attempt {attempt+1}/{MAX_RETRIES}): {e}", "ERROR")
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(RETRY_DELAY)
+        except Exception as e:
+            log(f"git 异常 (attempt {attempt+1}/{MAX_RETRIES}): {e}", "ERROR")
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(RETRY_DELAY)
+
+    log("推送失败：已达最大重试次数", "ERROR")
+    return False
 
 
 def process_one_xlsx(xlsx_path, do_push=True):
