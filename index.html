@@ -836,8 +836,10 @@ tr:hover td { background: var(--primary-light); }
 
 // ===== 数据加载逻辑（代码与数据分离 + 多月架构 @ 20260626）=====
 const DATA_FILE_NAME = '看板数据.json';
-const DATA_CACHE_KEY = 'dashboard_json_cache_v2';
 const DATA_CACHE_TIME_KEY = 'dashboard_json_cache_time_v2';
+// JSON 缓存改为内存变量，不再存 localStorage（避免与 cup_dashboard_v2_state 争抢 5MB 限额）
+// 之前 dashboard_json_cache_v2 占用 ~4.5MB，加上 state ~1.5MB = 6MB，超过浏览器 5MB 限制
+let _jsonCacheMemory = null; // 内存中的 JSON 缓存（不持久化）
 let dataLoadPromise = null;
 let allMonthsData = {};
 
@@ -1190,19 +1192,26 @@ function saveDataToFile() {
 }
 
 // DOM 加载后尝试自动读取数据文件
-// 优先级：fetch(服务器模式) → sessionStorage(同窗口缓存) → 自动弹文件选择框
+// 优先级：内存缓存 → fetch(服务器) → sessionStorage → 弹文件选择框
 window.addEventListener('DOMContentLoaded', function() {
   var loadedFromCache = false;
 
-  // Step 1: 尝试 localStorage 缓存（毫秒级即时加载）
+  // Step 0: 清理旧版 JSON 缓存（dashboard_json_cache_v2 占 ~4.5MB，已改为内存缓存）
   try {
-    var cachedRaw = localStorage.getItem(DATA_CACHE_KEY);
-    if (cachedRaw) {
-      var cached = JSON.parse(cachedRaw);
+    if (localStorage.getItem('dashboard_json_cache_v2')) {
+      localStorage.removeItem('dashboard_json_cache_v2');
+      console.log('[cache] 已清理旧版 JSON 缓存（释放 ~4.5MB localStorage 空间）');
+    }
+  } catch(e) {}
+
+  // Step 1: 尝试内存缓存（毫秒级即时加载，不占用 localStorage 空间）
+  try {
+    if (_jsonCacheMemory) {
+      var cached = JSON.parse(_jsonCacheMemory);
       applyData(cached);
       render();
       loadedFromCache = true;
-      console.log('[cache] 即时加载缓存 (' + (cached.savedAt || '').slice(0,10) + ')');
+      console.log('[cache] 即时加载内存缓存 (' + (cached.savedAt || '').slice(0,10) + ')');
     }
   } catch(e) { console.warn('[cache] 缓存加载失败:', e.message); }
 
@@ -1222,25 +1231,30 @@ window.addEventListener('DOMContentLoaded', function() {
       } catch(e) {}
 
       if (freshTime !== cachedTime) {
-        // 数据有变化：更新缓存并重渲染
-        try {
-          localStorage.setItem(DATA_CACHE_KEY, text);
-          localStorage.setItem(DATA_CACHE_TIME_KEY, freshTime);
-        } catch(e) { console.warn('[cache] 缓存写入失败（可能超出容量）'); }
+        // 数据有变化：更新内存缓存并重渲染
+        _jsonCacheMemory = text; // 内存缓存（不写 localStorage）
+        try { localStorage.setItem(DATA_CACHE_TIME_KEY, freshTime); } catch(e) {}
+        // 保护用户已上传的校准数据（防止 fetch 异步完成时覆盖用户刚上传的数据）
+        var userOverrides = state.targetOverrides;
+        var userCsvTotal = state.csvMonthTotal;
         applyData(fresh);
+        // restoreUserOverrides() 会从 localStorage 恢复，但如果保存失败（旧版bug），用内存备份
+        if (userOverrides && Object.keys(userOverrides).length > 0 &&
+            (!state.targetOverrides || Object.keys(state.targetOverrides).length === 0)) {
+          state.targetOverrides = userOverrides;
+          state.csvMonthTotal = userCsvTotal;
+          console.log('[cache] 已从内存恢复用户校准数据（fetch 后保护）');
+        }
         render();
         console.log('[cache] 数据已更新 (' + freshTime.slice(0,10) + ')');
-        showToast('数据已更新 (' + freshTime.slice(0,10) + ')', 'success');
       } else {
         console.log('[cache] 数据无变化');
         if (!loadedFromCache) {
-          // 首次访问但没有缓存差异，仍需要加载
+          // 首次访问但无缓存差异，仍需要加载
+          _jsonCacheMemory = text;
+          try { localStorage.setItem(DATA_CACHE_TIME_KEY, freshTime); } catch(e) {}
           applyData(fresh);
           render();
-          try {
-            localStorage.setItem(DATA_CACHE_KEY, text);
-            localStorage.setItem(DATA_CACHE_TIME_KEY, freshTime);
-          } catch(e) {}
         }
       }
     })
@@ -1604,54 +1618,67 @@ function saveToStorage() {
   if (state.isSnapshot) {
     return; // 快照模式下静默忽略，不触发下载
   }
+  var payload = {
+    currentMonth: state.currentMonth,
+    actualDaily: state.actualDaily,
+    targetOverrides: state.targetOverrides,
+    cityNotes: state.cityNotes,
+    notesHistory: state.notesHistory,
+    marketFilter: state.marketFilter,
+    productAvgMarketFilter: state.productAvgMarketFilter,
+    productDaily: state.productDaily,
+    dateMode: state.dateMode,
+    viewDate: state.viewDate,
+    startDate: state.startDate,
+    endDate: state.endDate,
+    subView: state.subView,
+    singleStoreFilters: state.singleStoreFilters,
+    singleStoreTopFilter: state.singleStoreTopFilter,
+    singleStoreSearch: state.singleStoreSearch,
+    singleStorePage: state.singleStorePage,
+    singleStoreTopSort: state.singleStoreTopSort,
+    singleStoreDetailSort: state.singleStoreDetailSort,
+    drill: state.drill,
+    drillPath: state.drillPaths[state.subView || 'dq'],
+    drillPaths: state.drillPaths,
+    topDrillPaths: state.topDrillPaths,
+    productDrillPaths: state.productDrillPaths,
+    topStores: state.topStores || [],
+    storeClass: state.storeClass,
+    tacticalTopFilter: state.tacticalTopFilter || 'all',
+    abcMarketFilter: state.abcMarketFilter || 'all',
+    abcDimFilter: state.abcDimFilter || 'all',
+    storeOverrides: state.storeOverrides,
+    productRequiredOverrides: state.productRequiredOverrides,
+    dataVersion: state.dataVersion,
+    updateTimes: state.updateTimes,
+    yoy25Data: state.yoy25Data
+  };
+  var json = JSON.stringify(payload);
   try {
-    const payload = {
-      currentMonth: state.currentMonth,
-      actualDaily: state.actualDaily,
-      targetOverrides: state.targetOverrides,
-      cityNotes: state.cityNotes,
-      notesHistory: state.notesHistory,
-      marketFilter: state.marketFilter,
-      productAvgMarketFilter: state.productAvgMarketFilter,
-      productDaily: state.productDaily,
-      dateMode: state.dateMode,
-      viewDate: state.viewDate,
-      startDate: state.startDate,
-      endDate: state.endDate,
-      subView: state.subView,
-      singleStoreFilters: state.singleStoreFilters,
-      singleStoreTopFilter: state.singleStoreTopFilter,
-      singleStoreSearch: state.singleStoreSearch,
-      singleStorePage: state.singleStorePage,
-      singleStoreTopSort: state.singleStoreTopSort,
-      singleStoreDetailSort: state.singleStoreDetailSort,
-      drill: state.drill,
-      drillPath: state.drillPaths[state.subView || 'dq'],
-      drillPaths: state.drillPaths,
-      topDrillPaths: state.topDrillPaths,
-      productDrillPaths: state.productDrillPaths,
-      topStores: state.topStores || [],
-      storeClass: state.storeClass,
-      tacticalTopFilter: state.tacticalTopFilter || 'all',
-      abcMarketFilter: state.abcMarketFilter || 'all',
-      abcDimFilter: state.abcDimFilter || 'all',
-      storeOverrides: state.storeOverrides,
-      productRequiredOverrides: state.productRequiredOverrides,
-      dataVersion: state.dataVersion,
-      updateTimes: state.updateTimes,
-      yoy25Data: state.yoy25Data
-    };
-    const json = JSON.stringify(payload);
     localStorage.setItem('cup_dashboard_v2_state', json);
-    showToast('数据已保存（约 ' + (json.length / 1024).toFixed(1) + ' KB）', 'success');
+    // 不再显示成功 toast（避免被上传函数的 toast 覆盖）
+    console.log('[saveToStorage] 已保存 ' + (json.length / 1024).toFixed(1) + ' KB');
   } catch (e) {
     console.error('[saveToStorage] 保存失败', e);
-    let msg = '浏览器保存失败：' + (e && e.message ? e.message : '未知错误');
     if (e && e.name === 'QuotaExceededError') {
-      msg = '本地存储空间不足（约5MB上限）。请立即点击「生成快照」导出独立HTML文件，或删除部分历史数据后再试。';
+      // 自动清理旧版 JSON 缓存（dashboard_json_cache_v2 占 ~4.5MB），然后重试
+      try {
+        localStorage.removeItem('dashboard_json_cache_v2');
+        localStorage.removeItem('dashboard_json_cache_v2_time');
+        console.log('[saveToStorage] 已清理旧版 JSON 缓存，重试保存...');
+        localStorage.setItem('cup_dashboard_v2_state', json);
+        console.log('[saveToStorage] 重试成功 ' + (json.length / 1024).toFixed(1) + ' KB');
+        return; // 重试成功，不报错
+      } catch (e2) {
+        console.error('[saveToStorage] 重试仍失败', e2);
+      }
+      var msg = '⚠️ 浏览器存储空间不足，校准数据未保存！\n刷新页面后校准数据会丢失。\n\n建议：点击「生成快照」导出带数据的 HTML 文件。';
+      alert(msg);
+      return;
     }
-    showToast(msg, 'error');
-    alert(msg + '\n\n建议操作：\n1. 点击右上角「生成快照」导出带数据的 HTML\n2. 以后直接双击快照文件打开，不再依赖浏览器缓存');
+    var msg2 = '保存失败：' + (e && e.message ? e.message : '未知错误');
+    showToast(msg2, 'error');
   }
 }
 
@@ -5158,9 +5185,10 @@ function processTargetPaste() {
   }
   state.csvMonthTotal = newSum;
   closeModal('targetModal');document.getElementById('targetPaste').value='';
-  saveToStorage();
+  // 先显示成功提示，再保存（saveToStorage 不再显示 toast，避免覆盖）
   showToast('校准 '+count+' 条｜新月目标 '+fmt(newSum)+' 杯｜内置 '+fmt(9132873)+' 杯｜差 '+(newSum-9132873>=0?'+':'')+fmt(newSum-9132873),'success');
   console.log('[Target] 校准 '+count+' 条, 新总和: '+fmt(newSum)+', 与内置差: '+(newSum-9132873));
+  saveToStorage();
   render();
 }
 
@@ -5257,10 +5285,30 @@ function hardResetTargetOverrides() {
 function bulkLoadTargetCsv(e) {
   const f = e.target.files[0];
   if (!f) return;
-  const r = new FileReader();
-  r.onload = ev => {
+  // 使用 arrayBuffer + 编码检测（兼容 UTF-8 和 GBK 文件）
+  if (f.arrayBuffer) {
+    f.arrayBuffer().then(buf => {
+      let text = '';
+      try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+      catch (err) { try { text = new TextDecoder('gbk').decode(buf); } catch(e2) { text = new TextDecoder('utf-8').decode(buf); } }
+      if (text.includes('\uFFFD')) {
+        try { const gbkText = new TextDecoder('gbk').decode(buf); if (!gbkText.includes('\uFFFD')) text = gbkText; } catch(e) {}
+      }
+      _processBulkTargetCsv(text, e);
+    }).catch(() => {
+      const r = new FileReader();
+      r.onload = ev => { _processBulkTargetCsv(ev.target.result, e); };
+      r.readAsText(f, 'utf-8');
+    });
+  } else {
+    const r = new FileReader();
+    r.onload = ev => { _processBulkTargetCsv(ev.target.result, e); };
+    r.readAsText(f, 'utf-8');
+  }
+}
+
+function _processBulkTargetCsv(text, e) {
     try {
-      const text = ev.target.result;
       // 去BOM
       const cleanText = text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
       const lines = cleanText.split(/\r?\n/).filter(l => l.trim());
@@ -5287,19 +5335,22 @@ function bulkLoadTargetCsv(e) {
         state.csvMonthTotal += t;
         count++;
       }
-      // 立即保存
-      saveToStorage();
+      if (count === 0) {
+        showToast('⚠️ 未解析到有效数据！请检查CSV格式（日期需为20260701格式）', 'error');
+        e.target.value = '';
+        return;
+      }
       closeModal('targetModal');
+      // 先显示成功提示，再保存（saveToStorage 不再显示 toast，避免覆盖）
       showToast('✅ 全量校准 '+count+' 条｜CSV月总和 '+fmt(state.csvMonthTotal)+'（内置 '+fmt(9132873)+'，差 '+(state.csvMonthTotal-9132873>=0?'+':'')+fmt(state.csvMonthTotal-9132873)+'）', 'success');
       console.log('[BulkTarget] '+count+' 条, CSV月总和: '+fmt(state.csvMonthTotal));
+      saveToStorage();
       render();
     } catch (err) {
       showToast('CSV 解析失败: ' + err.message, 'error');
     }
     // 清掉 input 以便下次还能选同一个文件
     e.target.value = '';
-  };
-  r.readAsText(f, 'utf-8');
 }
 
 // ===== VALIDATE =====
