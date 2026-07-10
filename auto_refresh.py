@@ -243,15 +243,16 @@ def update_json(date_str, actualDaily, productDaily):
 
 
 def git_push(commit_msg=None):
-    """提交并推送到GitHub"""
+    """提交并推送到GitHub（使用完整 git 路径，兼容 pythonw 后台运行）"""
+    GIT_EXE = r"C:\Users\62398\.workbuddy\vendor\PortableGit\mingw64\bin\git.exe"
     os.chdir(REPO_DIR)
 
     # Git add
-    subprocess.run(["git", "add", "看板数据.json"], check=True, capture_output=True)
+    subprocess.run([GIT_EXE, "add", "看板数据.json"], check=True, capture_output=True)
 
     # Check if there are changes to commit
     result = subprocess.run(
-        ["git", "diff", "--cached", "--quiet"], capture_output=True
+        [GIT_EXE, "diff", "--cached", "--quiet"], capture_output=True
     )
     if result.returncode == 0:
         log("数据无变更，跳过推送")
@@ -261,13 +262,13 @@ def git_push(commit_msg=None):
     if not commit_msg:
         commit_msg = f"数据更新: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
     subprocess.run(
-        ["git", "commit", "-m", commit_msg], check=True, capture_output=True, text=True
+        [GIT_EXE, "commit", "-m", commit_msg], check=True, capture_output=True, text=True
     )
     log(f"已提交: {commit_msg}")
 
     # Git push (use token URL to avoid credential prompt)
     result = subprocess.run(
-        ["git", "push", GITHUB_PUSH_URL, "main"], capture_output=True, text=True, encoding="utf-8"
+        [GIT_EXE, "push", GITHUB_PUSH_URL, "main"], capture_output=True, text=True, encoding="utf-8"
     )
     if result.returncode != 0:
         log(f"推送失败: {result.stderr}", "ERROR")
