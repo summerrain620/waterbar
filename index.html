@@ -998,6 +998,44 @@ function switchMonth(monthKey) {
 }
 
 // 将 JSON 数据应用到全局变量（支持新旧两种格式）
+// 从 localStorage (cup_dashboard_v2_state) 恢复用户手动校准的数据
+// 问题背景：applyData() 从 JSON 加载数据时会重置 state.targetOverrides 为 JSON 中的值（null），
+// 导致用户通过 processTargetPaste()/bulkLoadTargetCsv() 保存到 cup_dashboard_v2_state 的校准数据
+// 在刷新页面后丢失。此函数在 applyData() 之后执行，从 localStorage 恢复校准数据。
+function restoreUserOverrides() {
+  try {
+    var raw = localStorage.getItem('cup_dashboard_v2_state');
+    if (!raw) return;
+    var saved = JSON.parse(raw);
+    if (!saved.targetOverrides || Object.keys(saved.targetOverrides).length === 0) return;
+    // 只恢复属于当前月份的校准数据（避免 6 月校准数据错误覆盖到 7 月）
+    var monthPrefix = (state.currentMonth || '2026-07').replace(/-/g, '');
+    var filtered = {};
+    var hasData = false;
+    for (var d in saved.targetOverrides) {
+      if (d.startsWith(monthPrefix)) {
+        filtered[d] = saved.targetOverrides[d];
+        hasData = true;
+      }
+    }
+    if (hasData) {
+      state.targetOverrides = filtered;
+      if (allMonthsData[state.currentMonth]) {
+        allMonthsData[state.currentMonth].targetOverrides = filtered;
+      }
+      // 重新计算 csvMonthTotal
+      var total = 0;
+      for (var dd in filtered) {
+        for (var sc in filtered[dd]) total += filtered[dd][sc];
+      }
+      state.csvMonthTotal = total;
+      console.log('[restore] 恢复目标校准: ' + Object.keys(filtered).length + ' 天, 月总和: ' + total);
+    }
+  } catch(e) {
+    console.warn('[restore] 恢复用户数据失败:', e.message);
+  }
+}
+
 function applyData(data) {
   if (data.months && typeof data.months === 'object') {
     // 多月格式
@@ -1046,6 +1084,8 @@ function applyData(data) {
   updateHeaderInfo();
   updateMonthBar();
   sbUpdateBrandBadges();
+  // 从 localStorage 恢复用户手动校准的数据（targetOverrides 等）
+  restoreUserOverrides();
 }
 
 // 从 JSON 文件加载数据
