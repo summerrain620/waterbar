@@ -1009,6 +1009,9 @@ function switchMonth(monthKey) {
 // 导致用户通过 processTargetPaste()/bulkLoadTargetCsv() 保存到 cup_dashboard_v2_state 的校准数据
 // 在刷新页面后丢失。此函数在 applyData() 之后执行，从 localStorage 恢复校准数据。
 function restoreUserOverrides() {
+  // 如果 JSON 已有当前月的日目标数据，JSON 就是权威来源
+  // 不再从 localStorage 恢复旧校准数据（防止别人浏览器缓存旧值覆盖新 JSON）
+  if (DAILY_TARGETS && Object.keys(DAILY_TARGETS).length > 0) return;
   try {
     var raw = localStorage.getItem('cup_dashboard_v2_state');
     if (!raw) return;
