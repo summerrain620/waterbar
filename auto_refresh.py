@@ -180,7 +180,8 @@ def parse_csv_to_data(csv_path):
 
 def update_json(date_str, actualDaily, productDaily):
     """更新看板数据.json，合并新数据"""
-    with open(DATA_JSON, "r", encoding="utf-8") as f:
+    # encoding="utf-8-sig" handles both BOM and non-BOM files
+    with open(DATA_JSON, "r", encoding="utf-8-sig") as f:
         data = json.load(f)
 
     # Determine month key from date (20260706 -> "2026-07")
