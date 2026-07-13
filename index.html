@@ -2808,8 +2808,10 @@ function renderOverview(container, dayNum) {
   let day25S=null, cum25S=null, mon25S=null;
   if(state.yoy25Data && Object.keys(state.yoy25Data).length>0){
     day25S=0; cum25S=0; mon25S=0;
-    const dk='202507'+String(endDay).padStart(2,'0'), dd25=state.yoy25Data[dk]||{};
-    STORES.forEach(s=>{ day25S+=(dd25[s.sc]||0); });
+    for(let d=startDay; d<=endDay; d++){
+      const k='202507'+String(d).padStart(2,'0'), dd25=state.yoy25Data[k]||{};
+      STORES.forEach(s=>{ day25S+=(dd25[s.sc]||0); });
+    }
     for(let d=1;d<=endDay;d++){
       const k='202507'+String(d).padStart(2,'0'), dayData=state.yoy25Data[k]||{};
       STORES.forEach(s=>{ cum25S+=(dayData[s.sc]||0); });
@@ -4395,8 +4397,10 @@ function renderCityOverview(container, dayNum, city, cityStores) {
   const hasYoy = state.yoy25Data && Object.keys(state.yoy25Data).length > 0;
   if(hasYoy){
     cday25S=0; ccum25S=0; cmon25S=0;
-    const dk='202507'+String(endDay).padStart(2,'0'), dd25=state.yoy25Data[dk]||{};
-    cityStores.forEach(s=>{ cday25S+=(dd25[s.sc]||0); });
+    for(let d=startDay; d<=endDay; d++){
+      const k='202507'+String(d).padStart(2,'0'), dd25=state.yoy25Data[k]||{};
+      cityStores.forEach(s=>{ cday25S+=(dd25[s.sc]||0); });
+    }
     for(let d=1;d<=endDay;d++){
       const k='202507'+String(d).padStart(2,'0'), dayData=state.yoy25Data[k]||{};
       cityStores.forEach(s=>{ ccum25S+=(dayData[s.sc]||0); });
@@ -4733,8 +4737,10 @@ function renderSummaryCardsHtml(groups, dimName, dayNum) {
   let sday25=null, scum25=null, smon25=null;
   if(state.yoy25Data && Object.keys(state.yoy25Data).length>0){
     sday25=0; scum25=0; smon25=0;
-    const dk='202507'+String(endDay).padStart(2,'0'), dd25=state.yoy25Data[dk]||{};
-    STORES.forEach(s=>{ sday25+=(dd25[s.sc]||0); });
+    for(let d=startDay; d<=endDay; d++){
+      const k='202507'+String(d).padStart(2,'0'), dd25=state.yoy25Data[k]||{};
+      STORES.forEach(s=>{ sday25+=(dd25[s.sc]||0); });
+    }
     for(let d=1;d<=endDay;d++){
       const k='202507'+String(d).padStart(2,'0'), dayData=state.yoy25Data[k]||{};
       STORES.forEach(s=>{ scum25+=(dayData[s.sc]||0); });
@@ -6528,8 +6534,10 @@ function sbRenderSummaryCards(dayNum) {
   let sbDay25=null, sbCum25=null, sbMon25=null, sbDayYoy='-', sbCumYoy='-', sbMonYoy='-';
   if(activeBrand==='chayan' && state.yoy25Data && Object.keys(state.yoy25Data).length>0){
     sbDay25=0; sbCum25=0; sbMon25=0;
-    const dk='202507'+String(endDay).padStart(2,'0'), dd25=state.yoy25Data[dk]||{};
-    s.stores.forEach(st=>{ sbDay25+=(dd25[st.sc]||0); });
+    for(let d=startDay; d<=endDay; d++){
+      const k='202507'+String(d).padStart(2,'0'), dd25=state.yoy25Data[k]||{};
+      s.stores.forEach(st=>{ sbDay25+=(dd25[st.sc]||0); });
+    }
     for(let d=1;d<=endDay;d++){
       const k='202507'+String(d).padStart(2,'0'), dayData=state.yoy25Data[k]||{};
       s.stores.forEach(st=>{ sbCum25+=(dayData[st.sc]||0); });
